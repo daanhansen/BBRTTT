@@ -35,9 +35,6 @@ class Program
         Thread.Sleep(-1);
     }
 
-
-
-    // Game Server Connection
     private static async Task HandleGameServerConnected(GameServer server)
     {
         
@@ -70,17 +67,14 @@ class Program
 
     private async static Task HandlePlayerSpawned(MyPlayer player)
     {
-    
         if (!player.isAlive) {
             player.Kill();
             player.Message("Please wait for this game to end, you can spectate in the meantime.")
         }
-        // Add to spawned player list
         if (!spawnedPlayers.Contains(player))
         {
             spawnedPlayers.Add(player);
         }
-
         if (spawnedPlayers.Count >= 8 && !game.InProgress && !isCountdownInProgress)
         {
             isCountdownInProgress = true;
@@ -101,8 +95,6 @@ class Program
         CheckGameEnd();
         
     }
-
-
 
     private static async Task StartCountdown()
     {
@@ -166,7 +158,6 @@ class Program
                 player.SetThrowable(Throwables.FragGrenade);
                 player.SetHP(200f);
                 color = "red";
-                // In this description it should also say who the other traitors are.
                 description = $"Your mission is to murder all the other innocents, and the detective. Try working together with the other traitors: {string.Join(", ", traitorNames)}";
             }
             else if (player.role == "Detective")
@@ -223,38 +214,12 @@ class Program
             player.Message("The game has ended, respawn to play another.");
             player.Kill();
         }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    }
 
     private static int CalculateInitialTraitors()
     {
         return (int)Math.Ceiling(spawnedPlayers.Count * 0.2);
     }
-
-
-
-
-
-
-
 
 }
 

@@ -186,7 +186,7 @@ class Program
             player.Message($"<color=white>You are <color={color}> {player.role}. <br> <color=white> {description}");
         }
 
-        Console.WriteLine($"Game started with {spawnedPlayers.Count} Players and {game.TraitorsLeft} Traitors. {detective.Name} is the Detective!");
+        SayToChat($"[GAME] Started with {spawnedPlayers.Count} Players of which {game.TraitorsLeft} Traitors. {detective.Name} is the Detective!");
     }
 
     private static void CheckGameEnd()
@@ -203,7 +203,7 @@ class Program
 
     private static void EndGame(string winner)
     {
-        Console.WriteLine($"Game ended. {winner} win!");
+        SayToChat($"[GAME] Game ended! {winner} win!");
 
         game.InProgress = false;
         game.TraitorsLeft = 0;

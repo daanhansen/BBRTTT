@@ -1,102 +1,122 @@
 using BattleBitAPI;
-using BattleBitAPI.Server;
 using BattleBitAPI.Common;
-using System.Text.Json;
-using System.Text;
-using System.Numerics;
-using System.Threading.Tasks;
-using System.Collections.Generic;
+using BattleBitAPI.Server;
+using System;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 
 class Program
 {
-
-    TTTGame game = new TTTGame();
-    private static List<MyPlayer> spawnedPlayers = new List<MyPlayer>();
-    private static bool isCountdownInProgress = false;
-
-    public static void Main(string[] args)
+    static void Main(string[] args)
     {
-        var listener = new ServerListener<MyPlayer>();
-
-        listener.OnGameServerConnected += HandleGameServerConnected;
-        listener.OnGameServerDisconnected += HandleGameServerDisconnected;
-        listener.OnPlayerConnected += HandlePlayerConnected;
-        listener.OnPlayerDisconnected += HandlePlayerDisconnected;
-        listener.OnPlayerSpawning += HandlePlayerSpawning;
-        listener.OnPlayerSpawned += HandlePlayerSpawned;
-        listener.OnTick += HandleGameTick;
-        listener.OnAPlayerKilledAnotherPlayer += HandlePlayerKilledAnotherPlayer;
-
-        game.InProgress = false;
-        game.TraitorsLeft = 0;
-
+        var listener = new ServerListener<MyPlayer, MyGameServer>();
         listener.Start(29294);
+
         Thread.Sleep(-1);
     }
+}
 
-    private static async Task HandleGameServerConnected(GameServer server)
+class MyPlayer : Player<MyPlayer>
+{
+    public bool isPlaying = false;
+    public string role = "None";
+
+    public override async Task OnConnected()
     {
-        
+    }
+}
+
+class MyGameServer : GameServer<MyPlayer>
+{
+    private static readonly Random random = new Random();
+    private static readonly List<MyPlayer> spawnedPlayers = new List<MyPlayer>();
+    private static bool isCountdownInProgress = false;
+
+    public override async Task OnConnected()
+    {
+        ForceStartGame();
+        MapRotation.SetRotation("TensaTown"); // Specify your map name here.
+        GameModeRotation.SetRotation("FreeForAll");
+        ServerSettings.PointLogEnabled = false;
     }
 
-    private static async Task HandleGameServerDisconnected(GameServer server)
+    public override async Task OnPlayerConnected(MyPlayer player)
     {
-        
+        SayToChat($"<color=blue>[+] <color=white>Welcome {player.Name}!");
+        player.isPlaying = false;
+        player.role="None";
+        player.CanSpawn = false;
+        player.CanSpectate = true;
+        player.CanRespawn = false;
     }
 
-    private async static Task HandleGameTick()
+    public override async Task OnPlayerSpawned(MyPlayer player)
     {
-        
-    }
-
-    private static async Task HandlePlayerConnected(MyPlayer player)
-    {
-
-    }
-
-    private static async Task HandlePlayerDisconnected(MyPlayer player)
-    {
-
-    }
-
-    private async static Task<PlayerSpawnRequest> HandlePlayerSpawning(MyPlayer player, PlayerSpawnRequest request)
-    {   
-        return request;
-    }
-
-    private async static Task HandlePlayerSpawned(MyPlayer player)
-    {
-        if (!player.isAlive) {
+        if (!player.isPlaying || player.role == "None")
+        {
             player.Kill();
-            player.Message("Please wait for this game to end, you can spectate in the meantime.")
+            player.Message("Please wait for this game to end, you can spectate in the meantime.", 1f);
         }
+
         if (!spawnedPlayers.Contains(player))
         {
             spawnedPlayers.Add(player);
         }
+
         if (spawnedPlayers.Count >= 8 && !game.InProgress && !isCountdownInProgress)
         {
             isCountdownInProgress = true;
             await StartCountdown();
             isCountdownInProgress = false;
-        } else {
+        }
+        else
+        {
             SayToChat($"[GAME] {8 - spawnedPlayers.Count} Players needed to start a new game.");
         }
     }
 
-    private async static Task HandlePlayerKilledAnotherPlayer(MyPlayer killer, Vector3 killerPos, MyPlayer victim, Vector3 victimPos, string toolUsed)
+    public override async Task OnAPlayerDownedAnotherPlayer(OnPlayerKillArguments<MyPlayer> args)
     {
-        victim.isAlive = false;
-        if (spawnedPlayers.Contains(victim))
-        {
-            spawnedPlayers.Remove(victim);
-        }
-        CheckGameEnd();
-        
+        SayToChat($"[GAME] <color=orange> Someone has been downed with a {args.KillerTool}!");
     }
 
-    private static async Task StartCountdown()
+    public override async Task OnPlayerGivenUp(MyPlayer player)
+    {
+        SayToChat($"[GAME] <color=red> {player.Name} gave up and died...");
+    }
+
+    public override async Task OnPlayerDied(MyPlayer player)
+    {
+        player.isPlaying = false;
+        if (spawnedPlayers.Contains(player))
+        {
+            spawnedPlayers.Remove(player);
+        }
+        CheckGameEnd();
+        SayToChat($"[GAME] <color=red> Someone has been killed!");
+    }
+
+    public override async Task OnAPlayerRevivedAnotherPlayer(MyPlayer from, MyPlayer to)
+    {
+       SayToChat($"[GAME] <color=green> {to} has been revived by {from}!");
+    }
+
+    public override async Task OnPlayerDisconnected(MyPlayer player)
+    {
+        SayToChat($"<color=orange>[-]<color=white> Goodbye {player.Name}!");
+    }
+
+    public override async Task OnPlayerTypedMessage(MyPlayer player, ChatChannel channel, string msg)
+    {
+        // Will make a command here for a detective to get a bearing on the nearest traitor.
+        if (msg == "!locate") {
+            SayToChat($" X={player.Position.X} Y={player.Position.Y}");
+        }
+    }
+
+
+    private async Task StartCountdown()
     {
         const int countdownDuration = 60;
         var countdownTimer = new CountdownTimer(countdownDuration);
@@ -117,12 +137,11 @@ class Program
         }
     }
 
-    private static void StartGame()
+    private void StartGame()
     {
         game.InProgress = true;
         game.TraitorsLeft = CalculateInitialTraitors();
 
-        Random random = new Random();
         List<MyPlayer> potentialTraitors = new List<MyPlayer>(spawnedPlayers);
         for (int i = 0; i < game.TraitorsLeft; i++)
         {
@@ -137,11 +156,16 @@ class Program
 
         foreach (var player in spawnedPlayers)
         {
-            private string description;
-            private string color;
-            player.isAlive = true;
-            if (player.role == "Traitor")
+            player.CanSpawn = false;
+            player.CanRespawn = false;
+            player.HP = 100f;
+
+            player.DownTimeGiveUpTime = 30f;
+            private string description = "";
+            private string color = "";
+            switch(player.role) 
             {
+            case "Traitor":
                 List<string> traitorNames = new List<string>();
                 foreach (var traitor in potentialTraitors)
                 {
@@ -150,29 +174,28 @@ class Program
                         traitorNames.Add(traitor.Name);
                     }
                 }
-
                 player.SetPrimaryWeapon(default);
-                player.SetSecondaryWeapon(Weapons.USP);
+                player.SetSecondaryWeapon(Weapons.DesertEagle);
                 player.SetLightGadget(Gadgets.SledgeHammer);
                 player.SetHeavyGadget(Gadgets.C4);
                 player.SetThrowable(Throwables.FragGrenade);
-                player.SetHP(200f);
+                player.HP = 200f;
                 color = "red";
                 description = $"Your mission is to murder all the other innocents, and the detective. Try working together with the other traitors: {string.Join(", ", traitorNames)}";
-            }
-            else if (player.role == "Detective")
-            {
+                break;
+            case "Detective":
                 player.SetPrimaryWeapon(Weapons.REM700);
                 player.SetSecondaryWeapon(Weapons.Unica);
                 player.SetLightGadget(Gadgets.SledgeHammer);
                 player.SetHeavyGadget(Gadgets.AirDrone);
                 player.SetThrowable(Throwables.FragGrenade);
-                player.SetHP(500f);
+                player.JumpHeightMultiplier = 3f;
+                player.FallDamageMultiplier = 0f;
+                player.HP = 500f;
                 color = "blue";
                 description = "The traitors will try to kill you, find out who they are and protect the innocents.";
-            }
-            else
-            {
+                break;
+            case "Innocent":
                 player.role = "Innocent";
                 player.SetPrimaryWeapon(default);
                 player.SetSecondaryWeapon(Weapons.USP);
@@ -181,19 +204,23 @@ class Program
                 player.setThrowable(default)
                 color = "green";
                 description = "Try to avoid getting killed, and help the detective find out who the traitors are.";
+                break;
+            default:
+            break;
             }
-
-            player.Message($"<color=white>You are <color={color}> {player.role}. <br> <color=white> {description}");
+            player.Message($"<color=white>You are <color={color}> {player.role}. <br> <color=white> {description}", 1f);
         }
 
         SayToChat($"[GAME] Started with {spawnedPlayers.Count} Players of which {game.TraitorsLeft} Traitors. {detective.Name} is the Detective!");
     }
 
+
+
     private static void CheckGameEnd()
     {
-        int traitorsAlive = spawnedPlayers.Count(player => player.role == "Traitor" && player.isAlive);
-        int innocentsAlive = spawnedPlayers.Count(player => player.role == "Innocent" && player.isAlive);
-        int detectivesAlive = spawnedPlayers.Count(player => player.role == "Detective" && player.isAlive);
+        int traitorsAlive = spawnedPlayers.Count(player => player.role == "Traitor" && player.isPlaying);
+        int innocentsAlive = spawnedPlayers.Count(player => player.role == "Innocent" && player.isPlaying);
+        int detectivesAlive = spawnedPlayers.Count(player => player.role == "Detective" && player.isPlaying);
 
         if (traitorsAlive == 0 || innocentsAlive + detectivesAlive == 0)
         {
@@ -216,24 +243,8 @@ class Program
         }
     }
 
-    private static int CalculateInitialTraitors()
+    private int CalculateInitialTraitors()
     {
         return (int)Math.Ceiling(spawnedPlayers.Count * 0.2);
     }
-
 }
-
-class MyPlayer : Player
-{
-    public bool isAlive = true;
-    public string role = "None";
-}
-
-class TTTGame
-{
-    public bool InProgress { get; set; } = false;
-    public int TraitorsLeft { get; set; } = 0;
-}
-
-
-

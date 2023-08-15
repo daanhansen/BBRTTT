@@ -6,6 +6,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+// TO DO:
+
+
+
 class Program
 {
     static void Main(string[] args)
@@ -33,11 +37,15 @@ class MyGameServer : GameServer<MyPlayer>
     private static readonly List<MyPlayer> spawnedPlayers = new List<MyPlayer>();
     private static bool isCountdownInProgress = false;
 
+    // Change Traitor and Detective rates here!
+    public static float traitorRate = 0.2; // 20% of players will spawn as detective etc
+    public static float detectiveRate = 0.2;
+
     public override async Task OnConnected()
     {
         ForceStartGame();
-        MapRotation.SetRotation("TensaTown"); // Specify your map name here.
-        GameModeRotation.SetRotation("FreeForAll");
+        MapRotation.SetRotation("TensaTown", "District"); // Specify your map name(s) here.
+        GameModeRotation.SetRotation("FFA"); // FFA Mode Works Best.
         ServerSettings.PointLogEnabled = false;
     }
 
@@ -79,6 +87,9 @@ class MyGameServer : GameServer<MyPlayer>
     public override async Task OnAPlayerDownedAnotherPlayer(OnPlayerKillArguments<MyPlayer> args)
     {
         SayToChat($"[GAME] <color=orange> Someone has been downed with a {args.KillerTool}!");
+        if (args.Victim.role == "Jester" && args.Killer.role == "Innocent" || args.Killer.role == "Detective") {
+            EndGame("Jester");
+        }
     }
 
     public override async Task OnPlayerGivenUp(MyPlayer player)
@@ -92,6 +103,9 @@ class MyGameServer : GameServer<MyPlayer>
         if (spawnedPlayers.Contains(player))
         {
             spawnedPlayers.Remove(player);
+        }
+        if (player.role == "Traitor") {
+            game.TraitorsLeft--;
         }
         CheckGameEnd();
         SayToChat($"[GAME] <color=red> Someone has been killed!");
@@ -141,6 +155,8 @@ class MyGameServer : GameServer<MyPlayer>
     {
         game.InProgress = true;
         game.TraitorsLeft = CalculateInitialTraitors();
+        game.DetectivesLeft = CalculateInitialDetectives();
+
 
         List<MyPlayer> potentialTraitors = new List<MyPlayer>(spawnedPlayers);
         for (int i = 0; i < game.TraitorsLeft; i++)
@@ -150,9 +166,16 @@ class MyGameServer : GameServer<MyPlayer>
             traitor.role = "Traitor";
             potentialTraitors.RemoveAt(randomIndex);
         }
+        for (int i = 0; i < game.DetectivesLeft; i++)
+        {
+            int randomIndex = random.Next(potentialTraitors.Count);
+            MyPlayer detective = potentialTraitors[randomIndex];
+            detective.role = "Detective";
+            potentialTraitors.RemoveAt(randomIndex);
+        }
 
-        MyPlayer detective = potentialTraitors[random.Next(potentialTraitors.Count)];
-        detective.role = "Detective";
+        MyPlayer jester = potentialTraitors[random.Next(potentialTraitors.Count)];
+        detective.role = "Jester";
 
         foreach (var player in spawnedPlayers)
         {
@@ -160,7 +183,7 @@ class MyGameServer : GameServer<MyPlayer>
             player.CanRespawn = false;
             player.HP = 100f;
 
-            player.DownTimeGiveUpTime = 30f;
+            player.DownTimeGiveUpTime = 0f;
             private string description = "";
             private string color = "";
             switch(player.role) 
@@ -178,7 +201,7 @@ class MyGameServer : GameServer<MyPlayer>
                 player.SetSecondaryWeapon(Weapons.DesertEagle);
                 player.SetLightGadget(Gadgets.SledgeHammer);
                 player.SetHeavyGadget(Gadgets.C4);
-                player.SetThrowable(Throwables.FragGrenade);
+                player.SetThrowable(Throwables.FragGrenade, 2);
                 player.HP = 200f;
                 color = "red";
                 description = $"Your mission is to murder all the other innocents, and the detective. Try working together with the other traitors: {string.Join(", ", traitorNames)}";
@@ -188,12 +211,21 @@ class MyGameServer : GameServer<MyPlayer>
                 player.SetSecondaryWeapon(Weapons.Unica);
                 player.SetLightGadget(Gadgets.SledgeHammer);
                 player.SetHeavyGadget(Gadgets.AirDrone);
-                player.SetThrowable(Throwables.FragGrenade);
+                player.SetThrowable(Throwables.FragGrenade, 2);
                 player.JumpHeightMultiplier = 3f;
                 player.FallDamageMultiplier = 0f;
                 player.HP = 500f;
                 color = "blue";
                 description = "The traitors will try to kill you, find out who they are and protect the innocents.";
+                break;
+            case "Jester":
+                player.SetPrimaryWeapon(default);
+                player.SetSecondaryWeapon(Weapons.USP);
+                player.SetLightGadget(Gadgets.SledgeHammer);
+                player.SetHeavyGadget(Gadgets.AntiGrenadeTrophy);
+                player.setThrowable(default);
+                color = "pink";
+                description = "You win by tricking the Detective to kill you, but beware, the traitors know who you are and will try to kill you.";
                 break;
             case "Innocent":
                 player.role = "Innocent";
@@ -201,7 +233,7 @@ class MyGameServer : GameServer<MyPlayer>
                 player.SetSecondaryWeapon(Weapons.USP);
                 player.SetLightGadget(Gadgets.SledgeHammer);
                 player.SetHeavyGadget(Gadgets.AntiGrenadeTrophy);
-                player.setThrowable(default)
+                player.setThrowable(default);
                 color = "green";
                 description = "Try to avoid getting killed, and help the detective find out who the traitors are.";
                 break;
@@ -218,11 +250,15 @@ class MyGameServer : GameServer<MyPlayer>
 
     private static void CheckGameEnd()
     {
+        SayToChat($"[GAME] {spawnedPlayers.Count} Players left alive!");
         int traitorsAlive = spawnedPlayers.Count(player => player.role == "Traitor" && player.isPlaying);
         int innocentsAlive = spawnedPlayers.Count(player => player.role == "Innocent" && player.isPlaying);
         int detectivesAlive = spawnedPlayers.Count(player => player.role == "Detective" && player.isPlaying);
-
-        if (traitorsAlive == 0 || innocentsAlive + detectivesAlive == 0)
+        int jesterAlive = spawnedPlayers.Count(player => player.role == "Jester" && player.isPlaying);
+        if(traitorsAlive > 0) {
+            SayToChat($"[GAME] There are still {traitorsLeft} traitors among us!") // Yes i made an among us reference.
+        }
+        if (traitorsAlive == 0 || innocentsAlive + detectivesAlive + jesterAlive == 0)
         {
             EndGame(traitorsAlive > 0 ? "Traitors" : "Innocents");
         }
@@ -238,13 +274,17 @@ class MyGameServer : GameServer<MyPlayer>
         foreach (var player in spawnedPlayers)
         {
             player.role = "None";
-            player.Message("The game has ended, respawn to play another.");
+            player.Message("The game has ended, respawn to play another.", 1f);
             player.Kill();
         }
     }
 
     private int CalculateInitialTraitors()
     {
-        return (int)Math.Ceiling(spawnedPlayers.Count * 0.2);
+        return (int)Math.Ceiling(spawnedPlayers.Count * traitorRate);
+    }
+    private int CalculateInitialDetectives()
+    {
+        return (int)Math.Ceiling(spawnedPlayers.Count * detectiveRate);
     }
 }
